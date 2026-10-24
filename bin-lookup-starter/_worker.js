@@ -28,7 +28,7 @@ export default {
     }
 
     try {
-      const response = await fetch(`https://lookup.binlist.net/${bin}`, {
+      const response = await fetch(`https://binlist.io/lookup/${bin}/`, {
         headers: { "Accept-Version": "3" }
       });
 
