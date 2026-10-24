@@ -32,7 +32,7 @@ function normalizeFallbackResult(result, bin) {
 
   return {
     number: {
-      iin: data.bin || bin,
+      iin: bin,
       length: null,
       luhn: null
     },
@@ -49,6 +49,77 @@ function normalizeFallbackResult(result, bin) {
       url: data.bank_url || null
     },
     success: true
+  };
+}
+
+function isAbsent(value) {
+  if (value == null) {
+    return true;
+  }
+
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" ||
+    normalized === "unknown" ||
+    normalized === "n/a" ||
+    normalized === "na" ||
+    normalized === "null";
+}
+
+function needsEnrichment(result) {
+  return result.success === false || [
+    result.type,
+    result.category,
+    result.country?.alpha2,
+    result.country?.name,
+    result.bank?.name,
+    result.bank?.phone,
+    result.bank?.url
+  ].some(isAbsent);
+}
+
+function mergeFallbackResult(primary, fallback) {
+  const usefulFallbackValues = [
+    fallback.type,
+    fallback.category,
+    fallback.country?.alpha2,
+    fallback.country?.name,
+    fallback.bank?.name,
+    fallback.bank?.phone,
+    fallback.bank?.url
+  ];
+
+  if (!usefulFallbackValues.some((value) => !isAbsent(value))) {
+    return primary;
+  }
+
+  const fillGap = (primaryValue, fallbackValue) =>
+    isAbsent(primaryValue) && !isAbsent(fallbackValue)
+      ? fallbackValue
+      : primaryValue;
+
+  return {
+    ...primary,
+    number: primary.number == null
+      ? primary.number
+      : { ...primary.number },
+    type: fillGap(primary.type, fallback.type),
+    category: fillGap(primary.category, fallback.category),
+    country: {
+      ...(primary.country || {}),
+      alpha2: fillGap(primary.country?.alpha2, fallback.country?.alpha2),
+      name: fillGap(primary.country?.name, fallback.country?.name)
+    },
+    bank: {
+      ...(primary.bank || {}),
+      name: fillGap(primary.bank?.name, fallback.bank?.name),
+      phone: fillGap(primary.bank?.phone, fallback.bank?.phone),
+      url: fillGap(primary.bank?.url, fallback.bank?.url)
+    },
+    success: primary.success === false ? true : primary.success
   };
 }
 
@@ -78,7 +149,10 @@ async function lookupFallback(bin, env, primaryResult) {
 
     const result = await response.json();
     return result.success === true
-      ? normalizeFallbackResult(result, bin)
+      ? mergeFallbackResult(
+          primaryResult,
+          normalizeFallbackResult(result, bin)
+        )
       : primaryResult;
   } catch {
     console.error("BIN fallback upstream request failed", {
@@ -130,7 +204,7 @@ export default {
 
       const result = await response.json();
 
-      if (result.success === false) {
+      if (needsEnrichment(result)) {
         const fallbackResult = await lookupFallback(bin, env, result);
         return Response.json(fallbackResult, {
           headers: { "Cache-Control": "public, max-age=86400" }
